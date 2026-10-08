@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Grid Runner</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon.png">
+    <style>
+        :root {
+            --bg-body: #050505;
+            --bg-arena: #0c0c0e;
+            --border-ui: #1c1c22;
+            --text-main: #FFFFFF;
+            --text-muted: #A3A3A3;
+            --color-accent: #22c55e;
+            --grid-line: #141419;
+            --overlay-bg: rgba(5, 5, 5, 0.9);
+        }
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg-body: #F4F4F5;
+                --bg-arena: #FFFFFF;
+                --border-ui: #E4E4E7;
+                --text-main: #18181B;
+                --text-muted: #71717A;
+                --color-accent: #16a34a;
+                --grid-line: #E4E4E7;
+                --overlay-bg: rgba(255, 255, 255, 0.94);
+            }
+        }
+        body {
+            background-color: var(--bg-body); color: var(--text-main);
+            font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0;
+            overflow: hidden; width: 100vw; height: 100vh; display: flex;
+            justify-content: center; align-items: center; user-select: none;
+            -webkit-user-select: none; touch-action: none; transition: background-color 0.3s;
+        }
+        .game-wrapper { display: flex; flex-direction: column; align-items: center; width: 100%; height: 100%; padding: 10px 15px 45px 15px; box-sizing: border-box; }
+        .scoreboard { width: 100%; max-width: 500px; display: flex; justify-content: space-between; margin-bottom: 12px; padding: 0 10px; box-sizing: border-box; z-index: 10; }
+        .score-box { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
+        .score-val { color: var(--text-main); font-variant-numeric: tabular-nums; font-size: 16px; margin-left: 4px; }
+        #highScoreVal { color: var(--color-accent); text-shadow: 0 0 8px rgba(34, 197, 94, 0.4); }
+        .canvas-container { position: relative; width: 100%; flex: 1; background-color: var(--bg-arena); overflow: hidden; border-radius: 20px; }
+        canvas { display: block; width: 100%; height: 100%; }
+        .menu-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--overlay-bg); display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box; text-align: center; z-index: 20; }
+        h1 { font-size: 32px; font-weight: 800; margin: 0 0 10px 0; letter-spacing: -1px; background: linear-gradient(135deg, #22c55e, #86efac); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .desc-text { color: var(--text-muted); font-size: 14px; margin: 0 0 28px 0; max-width: 260px; line-height: 1.4; }
+        .action-btn { background-color: var(--text-main); border: none; color: var(--bg-body); padding: 16px 44px; border-radius: 30px; font-size: 16px; font-weight: 700; cursor: pointer; }
+        @media (min-width: 600px) and (min-height: 600px) {
+            .game-wrapper { width: 460px; height: 720px; padding: 15px; }
+            .canvas-container { border: 2px solid var(--border-ui); border-radius: 24px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4); flex: none; height: 620px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-wrapper">
+        <div class="scoreboard">
+            <div class="score-box">Score:<span class="score-val" id="currentScoreVal">0</span></div>
+            <div class="score-box">Best:<span class="score-val" id="highScoreVal">0</span></div>
+        </div>
+        <div class="canvas-container" id="arenaBox">
+            <canvas id="gameCanvas"></canvas>
+            <div class="menu-overlay" id="menuOverlay">
+                <h1 id="menuTitle">GRID RUNNER</h1>
+                <p class="desc-text" id="menuDesc">Tap Left/Right screen halves to swap highway lanes. Dodge the red walls!</p>
+                <button class="action-btn" id="startBtn" onclick="initiateGameSession()">Launch Mission</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const arena = document.getElementById('arenaBox');
+        const overlay = document.getElementById('menuOverlay');
+        const menuTitle = document.getElementById('menuTitle');
+        const menuDesc = document.getElementById('menuDesc');
+        const startBtn = document.getElementById('startBtn');
+        const scoreDisplay = document.getElementById('currentScoreVal');
+        const highDisplay = document.getElementById('highScoreVal');
+
+        let gameState = "MENU"; let score = 0; let highScore = 0; let animationFrameId;
+        const ship = { lane: 1, x: 0, y: 0, width: 30, height: 25 };
+        let obstacles = []; let baseSpeed = 5; let spawnTimer = 0;
+
+        function dynamicallyScaleGameCanvas() {
+            canvas.width = arena.clientWidth * window.devicePixelRatio;
+            canvas.height = arena.clientHeight * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            const w = canvas.width / window.devicePixelRatio;
+            const h = canvas.height / window.devicePixelRatio;
+            ship.y = h - 80;
+            if (gameState === "MENU") { ship.x = (w / 3) * 1.5; }
+        }
+        window.addEventListener('resize', dynamicallyScaleGameCanvas);
+
+        window.addEventListener('DOMContentLoaded', () => {
+            dynamicallyScaleGameCanvas();
+            const savedRecord = localStorage.getItem('hs_grid_runner_isolated');
+            if (savedRecord) { highScore = parseInt(savedRecord, 10); highDisplay.innerText = highScore; }
+        });
+
+        window.addEventListener('touchstart', handleInputEvent);
+        window.addEventListener('mousedown', handleInputEvent);
+
+        function handleInputEvent(e) {
+            if (gameState !== "PLAYING") return;
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            if (clientX - rect.left < rect.width / 2) {
+                if (ship.lane > 0) ship.lane--;
+            } else {
+                if (ship.lane < 2) ship.lane++;
+            }
+        }
+        function initiateGameSession() {
+            dynamicallyScaleGameCanvas();
+            overlay.style.display = 'none';
+            gameState = "PLAYING"; score = 0; scoreDisplay.innerText = score;
+            obstacles = []; baseSpeed = 5; spawnTimer = 0; ship.lane = 1;
+            cancelAnimationFrame(animationFrameId);
+            gameLoopEngineTick();
+        }
+
+        function triggerGameOverSequence() {
+            gameState = "GAMEOVER"; cancelAnimationFrame(animationFrameId);
+            if (score > highScore) { highScore = score; highDisplay.innerText = highScore; localStorage.setItem('hs_grid_runner_isolated', highScore.toString()); }
+            menuTitle.innerText = "MISSION FAILED"; menuTitle.style.background = "linear-gradient(135deg, #ef4444, #fca5a5)"; menuTitle.style.webkitBackgroundClip = "text";
+            menuDesc.innerText = `You smashed a barrier!\nFinal Score: ${score}`; startBtn.innerText = "Try Again"; overlay.style.display = 'flex';
+        }
+
+        function gameLoopEngineTick() {
+            if (gameState !== "PLAYING") return;
+            const w = canvas.width / window.devicePixelRatio; const h = canvas.height / window.devicePixelRatio;
+            spawnTimer++;
+
+            const styles = getComputedStyle(document.documentElement);
+            ctx.fillStyle = styles.getPropertyValue('--bg-arena').trim(); ctx.fillRect(0, 0, w, h);
+
+            ctx.strokeStyle = styles.getPropertyValue('--grid-line').trim(); ctx.lineWidth = 1;
+            for (let i = 0; i < w; i += 40) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, h); ctx.stroke(); }
+
+            let laneWidth = w / 3;
+            let targetX = (ship.lane * laneWidth) + (laneWidth / 2);
+            ship.x += (targetX - ship.x) * 0.3;
+
+            if (spawnTimer % 45 === 0) {
+                runnerObstaclesWidth = laneWidth - 25;
+                obstacles.push({ lane: Math.floor(Math.random() * 3), y: -30, width: runnerObstaclesWidth, height: 18 });
+            }
+
+            ctx.fillStyle = styles.getPropertyValue('--color-accent').trim() || "#22c55e";
+            ctx.beginPath(); ctx.moveTo(ship.x, ship.y); ctx.lineTo(ship.x - ship.width / 2, ship.y + ship.height); ctx.lineTo(ship.x + ship.width / 2, ship.y + ship.height); ctx.closePath(); ctx.fill();
+
+            ctx.fillStyle = "#ef4444";
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let obs = obstacles[i]; obs.y += baseSpeed;
+                let obsX = (obs.lane * laneWidth) + (laneWidth - obs.width) / 2;
+                ctx.beginPath(); ctx.roundRect(obsX, obs.y, obs.width, obs.height, 4); ctx.fill();
+
+                if (obs.y + obs.height >= ship.y && obs.y <= ship.y + ship.height && ship.x + ship.width * 0.4 >= obsX && ship.x - ship.width * 0.4 <= obsX + obs.width) {
+                    triggerGameOverSequence(); return;
+                }
+                if (obs.y > h) { obstacles.splice(i, 1); score++; scoreDisplay.innerText = score; if (score % 12 === 0) baseSpeed += 0.4; }
+            }
+            animationFrameId = requestAnimationFrame(gameLoopEngineTick);
+        }
+    </script>
+</body>
+</html>
