@@ -1,0 +1,8 @@
+{
+  "name": "Grid Runner Speed Test",
+  "short_name": "Grid Runner",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#050505"
+}
